@@ -1,0 +1,11 @@
+{
+  "tasks": [
+    {
+      "type": "shell",
+      "label": "Build test binary",
+      "command": "cargo",
+      "args": ["test", "--no-run"],
+      "problemMatcher": ["$rustc"]
+    }
+  ]
+}
