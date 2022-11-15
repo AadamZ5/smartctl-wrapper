@@ -98,7 +98,11 @@ impl SmartCtl {
             None => match Command::new("which").arg("smartctl").output() {
                 Ok(output) => {
                     let output = String::from_utf8(output.stdout)?;
-                    output.trim().to_string()
+                    let trimmed = output.trim().to_string();
+                    if trimmed.is_empty() {
+                        return Err(Error::msg("Could not find smartctl binary"));
+                    }
+                    trimmed
                 }
                 Err(_) => String::from("smartctl"),
             },
@@ -192,6 +196,36 @@ impl SmartCtl {
         let output: serde_json::Value = serde_json::from_str(&output)?;
 
         return Ok(output);
+    }
+
+    fn _parse_scan_output(&self, json: serde_json::Value) -> Result<Vec<String>, Error> {
+        let devices = json["devices"]
+            .as_array()
+            .ok_or(Error::msg("Invalid devices format"))?;
+
+        let mut device_list = Vec::new();
+
+        for device in devices.iter() {
+            let device_name = device["name"]
+                .as_str()
+                .ok_or(Error::msg("Invalid device name format"))?
+                .to_string();
+            device_list.push(device_name);
+        }
+
+        return Ok(device_list);
+    }
+
+    pub fn scan(&self) -> Result<Vec<String>, Error> {
+        let output = self.execute(vec!["-j".to_string(), "--scan".to_string()])?;
+
+        return self._parse_scan_output(output);
+    }
+
+    pub fn scan_open(&self) -> Result<Vec<String>, Error> {
+        let output = self.execute(vec!["-j".to_string(), "--scan-open".to_string()])?;
+
+        return self._parse_scan_output(output);
     }
 
     pub fn get_device(&self, device_path: String) -> Result<SmartCtlDevice, Error> {

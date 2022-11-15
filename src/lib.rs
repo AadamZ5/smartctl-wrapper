@@ -13,7 +13,7 @@ mod tests {
 
     extern crate pretty_env_logger;
     use super::*;
-    use log::info;
+    use log::{debug, info};
     use std::process::Command;
     use std::sync::Once;
 
@@ -48,10 +48,20 @@ mod tests {
         .unwrap()
         .trim()
         .to_string();
-
+        debug!("Using path {:?}", path);
         let result = SmartCtl::new(Some(path));
         assert!(result.is_ok());
         info!("Smartctl version: {}", result.unwrap().get_version_info())
+    }
+
+    #[test]
+    fn list_devices() {
+        init();
+        let smartctl = SmartCtl::new(None).unwrap();
+        let devices = smartctl.scan().unwrap();
+        for device in devices {
+            info!("Device: {:?}", device);
+        }
     }
 
     #[test]
