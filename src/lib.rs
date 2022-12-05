@@ -50,6 +50,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn no_path_supplied() {
         init();
         let result = SmartCtl::new();
@@ -57,6 +58,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn with_path_supplied() {
         init();
         let path = String::from_utf8(
@@ -77,6 +79,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn list_devices() {
         init();
         let smartctl = SmartCtl::new().unwrap();
@@ -87,6 +90,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn get_device() {
         init();
         let smartctl = SmartCtl::new().unwrap();
