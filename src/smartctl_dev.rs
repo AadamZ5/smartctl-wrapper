@@ -67,7 +67,7 @@ pub struct SmartCtlDevice {
 
 impl SmartCtlDevice {
     pub fn new(path: String, smart_ctl: Option<SmartCtl>) -> Result<Self, Error> {
-        let bin_instance = smart_ctl.unwrap_or(SmartCtl::new(None)?);
+        let bin_instance = smart_ctl.unwrap_or(SmartCtl::new()?);
 
         let dev = bin_instance.get_device(path)?;
 

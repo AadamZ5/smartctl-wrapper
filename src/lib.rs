@@ -1,3 +1,24 @@
+//! A thin wrapper around the `smartctl` binary from the [smartmontools](https://www.smartmontools.org/) project.
+//!
+//! # Requirements
+//! - This crate depends on the `-j` JSON output option of `smartctl` being available.
+//! This is available in smartmontools 7 and later.
+//! - This crate depends on the `smartctl` binary being available on the system.
+//! - The program that uses this crate must have necessary permisssions to execute
+//! `smartctl`. `smartctl` needs kernel-level access to devices.
+//!
+//! # Examples
+//!
+//! ## Get a list of all S.M.A.R.T. devices
+//! ```rust
+//! use smartctl_wrapper::SmartCtl;
+//!
+//! let smartctl = SmartCtl::new().unwrap();
+//! let devices = smartctl.scan().unwrap();
+//!
+//! println!("Devices:\n {}", devices.join("\n"));
+//! ```
+
 mod smartctl_bin;
 mod smartctl_dev;
 mod test_util;
@@ -31,7 +52,7 @@ mod tests {
     #[test]
     fn no_path_supplied() {
         init();
-        let result = SmartCtl::new(None);
+        let result = SmartCtl::new();
         assert!(result.is_ok());
     }
 
@@ -49,15 +70,16 @@ mod tests {
         .trim()
         .to_string();
         debug!("Using path {:?}", path);
-        let result = SmartCtl::new(Some(path));
+        let result = SmartCtl::new_with_path(path);
         assert!(result.is_ok());
-        info!("Smartctl version: {}", result.unwrap().get_version_info())
+        let smartctl = result.unwrap();
+        info!("Smartctl version: {}", smartctl.get_version_info())
     }
 
     #[test]
     fn list_devices() {
         init();
-        let smartctl = SmartCtl::new(None).unwrap();
+        let smartctl = SmartCtl::new().unwrap();
         let devices = smartctl.scan().unwrap();
         for device in devices {
             info!("Device: {:?}", device);
@@ -67,7 +89,7 @@ mod tests {
     #[test]
     fn get_device() {
         init();
-        let smartctl = SmartCtl::new(None).unwrap();
+        let smartctl = SmartCtl::new().unwrap();
         let device = smartctl.get_device("/dev/sda".to_string()).unwrap();
         info!("Device: {:?}", device);
     }
