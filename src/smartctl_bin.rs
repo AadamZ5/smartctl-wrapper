@@ -248,7 +248,7 @@ impl SmartCtl {
     /// * `args` - An iterable item that contains items that can be turned `Into<String>`
     ///
     /// # Example
-    /// ```rust
+    /// ```rust,ignore
     /// use smartctl_wrapper::SmartCtl;
     ///
     /// let smartctl_bin = SmartCtl::new().unwrap();

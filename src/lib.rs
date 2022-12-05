@@ -10,7 +10,7 @@
 //! # Examples
 //!
 //! ## Get a list of all S.M.A.R.T. devices
-//! ```rust
+//! ```rust,ignore
 //! use smartctl_wrapper::SmartCtl;
 //!
 //! let smartctl = SmartCtl::new().unwrap();
