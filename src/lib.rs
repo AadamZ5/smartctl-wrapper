@@ -21,12 +21,20 @@
 
 mod smartctl_bin;
 mod smartctl_dev;
+mod smartctl_testing;
 mod test_util;
 
 pub use smartctl_bin::SmartCtl;
 pub use smartctl_dev::{
     SmartCtlCapacityInfo, SmartCtlDevice, SmartCtlDeviceFormFactor, SmartCtlDeviceHealth,
     SmartCtlWwn,
+};
+pub use smartctl_testing::smartctl_test::{
+    SmartCtlSelfTest, SmartCtlSelfTestPolling, SmartCtlSelfTestStatus,
+};
+pub use smartctl_testing::smartctl_test_entry::{
+    smartctl_test_entry::{SmartCtlTestEntry, SmartCtlTestEntryStatus, SmartCtlTestEntryType},
+    smartctl_test_entry_status_value::SmartCtlTestEntryStatusValue,
 };
 
 #[cfg(test)]

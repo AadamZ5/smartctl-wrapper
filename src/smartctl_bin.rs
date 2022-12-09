@@ -1,18 +1,14 @@
 use std::fmt::Display;
 
-use crate::smartctl_dev::{
-    SmartCtlCapacityInfo, SmartCtlDevice, SmartCtlDeviceFormFactor, SmartCtlDeviceHealth,
-    SmartCtlWwn,
-};
+use crate::smartctl_dev::{parse_json_device_output, SmartCtlDevice};
 use anyhow::Error;
 use log::{debug, error, warn};
-use serde::Deserialize;
 use std::process::Command;
 
-pub type JsonVersionType = (u8, u8);
+pub type JsonVersionType = [u8; 2];
 
-pub const SUPPORTED_JSON_VERSIONS: [JsonVersionType; 1] = [(1, 0)];
-pub const SUPPORTED_SMARTCTL_VERSIONS: [JsonVersionType; 3] = [(7, 2), (7, 3), (7, 4)];
+pub const SUPPORTED_JSON_VERSIONS: [JsonVersionType; 1] = [[1, 0]];
+pub const SUPPORTED_SMARTCTL_VERSIONS: [JsonVersionType; 3] = [[7, 2], [7, 3], [7, 4]];
 
 fn _parse_version(version_json: &serde_json::Value) -> Result<JsonVersionType, Error> {
     // Version should be an array
@@ -38,7 +34,7 @@ fn _parse_version(version_json: &serde_json::Value) -> Result<JsonVersionType, E
     }
 
     let version_tuple = match (version_array[0].as_u64(), version_array[1].as_u64()) {
-        (Some(major), Some(minor)) => Ok((major as u8, minor as u8)),
+        (Some(major), Some(minor)) => Ok([major as u8, minor as u8]),
         _ => Err(Error::msg("Invalid version format")),
     }?;
 
@@ -50,7 +46,7 @@ fn _validate_version(
     supported_versions: &[JsonVersionType],
 ) -> bool {
     for supported_version in supported_versions.iter() {
-        if json_version.0 == supported_version.0 && json_version.1 == supported_version.1 {
+        if json_version[0] == supported_version[0] && json_version[1] == supported_version[1] {
             return true;
         }
     }
@@ -104,7 +100,7 @@ where
     })
 }
 
-fn parse_json_scan_output(json: serde_json::Value) -> Result<Vec<String>, Error> {
+fn parse_json_scan_output(json: &serde_json::Value) -> Result<Vec<String>, Error> {
     let devices = json["devices"]
         .as_array()
         .ok_or_else(|| Error::msg("Invalid devices format"))?;
@@ -121,7 +117,6 @@ fn parse_json_scan_output(json: serde_json::Value) -> Result<Vec<String>, Error>
 
     Ok(device_list)
 }
-
 #[derive(Debug, Clone)]
 pub struct SmartCtlVersionInfo {
     pub json_format_version: JsonVersionType,
@@ -139,13 +134,13 @@ impl Display for SmartCtlVersionInfo {
         write!(
             f,
             "smartctl {}.{} r{} [{}] {} (json {}.{})",
-            self.smartctl_version.0,
-            self.smartctl_version.1,
+            self.smartctl_version[0],
+            self.smartctl_version[1],
             self.svn_revision,
             self.platform_info,
             self.build_info,
-            self.json_format_version.0,
-            self.json_format_version.1,
+            self.json_format_version[0],
+            self.json_format_version[1],
         )
     }
 }
@@ -241,7 +236,8 @@ impl SmartCtl {
     }
 
     /// Execute the smartctl binary with the supplied arguments. This is the lowest
-    /// level wrapper around the binary. There is no parsing of the output.
+    /// level wrapper around the binary. There is no parsing of the output except
+    /// converting it to a string.
     ///
     /// # Arguments
     ///
@@ -266,7 +262,7 @@ impl SmartCtl {
             .output()
             .map_err(|e| {
                 Error::msg(format!(
-                    "Failed to execute smartctl ({:?}): {}",
+                    "Failed to execute smartctl (at {:?}): {}",
                     self.path, e
                 ))
             })?;
@@ -289,9 +285,10 @@ impl SmartCtl {
         T: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let j_arg = ["-j".to_string()].into_iter();
-        let mapped_args = args.into_iter().map(|arg| Into::<String>::into(arg));
-        let new_args = j_arg.chain(mapped_args);
+        // Prepend the -j argument to the supplied arguments by
+        // chaining an iterator of ["-j"] with the supplied arguments
+        let new_args = std::iter::once("-j".to_string())
+            .chain(args.into_iter().map(|arg| Into::<String>::into(arg)));
         let output = self.execute(new_args)?;
 
         let output: serde_json::Value = serde_json::from_str(&output)?;
@@ -305,7 +302,7 @@ impl SmartCtl {
     pub fn scan(&self) -> Result<Vec<String>, Error> {
         let output = self.execute_json(["--scan"])?;
 
-        parse_json_scan_output(output)
+        parse_json_scan_output(&output)
     }
 
     /// Scan for devices using the `smartctl` binary. Equivalent to `smartctl -j --scan-open`
@@ -314,72 +311,15 @@ impl SmartCtl {
     pub fn scan_open(&self) -> Result<Vec<String>, Error> {
         let output = self.execute_json(["--scan-open"])?;
 
-        parse_json_scan_output(output)
+        parse_json_scan_output(&output)
     }
 
     /// Get a device using the `smartctl` binary. This function will return a `SmartCtlDevice`
     /// object that can be used to query the device.
     pub fn get_device(&self, device_path: String) -> Result<SmartCtlDevice, Error> {
-        let json_response = self.execute_json(["--info".to_string(), device_path])?;
+        let json = self.execute_json(["--info".to_string(), device_path])?;
 
-        let form_factor =
-            SmartCtlDeviceFormFactor::deserialize(&json_response["device"]["form_factor"]).ok();
-
-        let wwn = SmartCtlWwn::deserialize(&json_response["wwn"]).ok();
-
-        let capacity = SmartCtlCapacityInfo {
-            blocks: json_response["user_capacity"]["blocks"]
-                .as_u64()
-                .ok_or_else(|| Error::msg("Invalid user_capacity/blocks format"))?,
-            bytes: json_response["user_capacity"]["bytes"]
-                .as_u64()
-                .ok_or_else(|| Error::msg("Invalid user_capacity/bytes format"))?,
-            logical_block_size: json_response["logical_block_size"]
-                .as_u64()
-                .ok_or_else(|| Error::msg("Invalid logical_block_size format"))?,
-            physical_block_size: json_response["physical_block_size"]
-                .as_u64()
-                .ok_or_else(|| Error::msg("Invalid physical_block_size format"))?,
-        };
-
-        let device = SmartCtlDevice {
-            name: json_response["device"]["name"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string(),
-            info_name: json_response["device"]["info_name"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string(),
-            type_: json_response["device"]["type"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string(),
-            protocol: json_response["device"]["protocol"]
-                .as_str()
-                .unwrap_or("Unknown")
-                .to_string(),
-
-            model_family: json_response["device"]["model_family"]
-                .as_str()
-                .map(|s| s.to_string()),
-            model_name: json_response["model_name"].as_str().map(|s| s.to_string()),
-            serial_number: json_response["serial_number"]
-                .as_str()
-                .map(|s| s.to_string()),
-            firmware_version: json_response["firmware_version"]
-                .as_str()
-                .map(|s| s.to_string()),
-            wwn,
-            capacity,
-            rotation_rate: json_response["rotation_rate"].as_u64(),
-
-            form_factor,
-
-            device_health: SmartCtlDeviceHealth {},
-        };
-
-        Ok(device)
+        parse_json_device_output(&json)
     }
 }
 
@@ -387,110 +327,83 @@ impl SmartCtl {
 mod tests {
 
     use super::*;
+    use crate::test_util::example_outputs::{EXAMPLE_SCAN, EXAMPLE_SCAN_OPEN};
 
     #[test]
     fn test_parse_version_info() {
-        let example_output = r#"
-        {
-            "json_format_version": [
-              1,
-              0
-            ],
-            "smartctl": {
-              "version": [
-                7,
-                2
-              ],
-              "svn_revision": "5155",
-              "platform_info": "x86_64-linux-6.0.6-76060006-generic",
-              "build_info": "(local build)",
-              "argv": [
-                "smartctl",
-                "--scan",
-                "-j"
-              ],
-              "exit_status": 0
-            },
-            "devices": [
-              {
-                "name": "/dev/sda",
-                "info_name": "/dev/sda",
-                "type": "scsi",
-                "protocol": "SCSI"
-              },
-              {
-                "name": "/dev/sdb",
-                "info_name": "/dev/sdb",
-                "type": "scsi",
-                "protocol": "SCSI"
-              },
-              {
-                "name": "/dev/sdc",
-                "info_name": "/dev/sdc",
-                "type": "scsi",
-                "protocol": "SCSI"
-              }
-            ]
-          }          
-        "#;
+        let example_outputs = EXAMPLE_SCAN.iter().chain(EXAMPLE_SCAN_OPEN.iter());
 
-        let version_info = parse_version_info(example_output).unwrap();
-        assert!(version_info.smartctl_version == (7, 2));
-        assert!(version_info.svn_revision == "5155");
-        assert!(version_info.platform_info == "x86_64-linux-6.0.6-76060006-generic");
-        assert!(version_info.build_info == "(local build)");
-        assert!(version_info.json_format_version == (1, 0));
+        for output in example_outputs {
+            let version_info = parse_version_info(*output).unwrap();
+            let json_output: serde_json::Value = serde_json::from_str(output).unwrap();
+            assert_eq!(
+                version_info.svn_revision,
+                json_output
+                    .get("smartctl")
+                    .and_then(|v| v.get("svn_revision"))
+                    .and_then(|v| v.as_str())
+                    .unwrap()
+            );
+            assert_eq!(
+                version_info.platform_info,
+                json_output
+                    .get("smartctl")
+                    .and_then(|v| v.get("platform_info"))
+                    .and_then(|v| v.as_str())
+                    .unwrap()
+            );
+            assert_eq!(
+                version_info.build_info,
+                json_output
+                    .get("smartctl")
+                    .and_then(|v| v.get("build_info"))
+                    .and_then(|v| v.as_str())
+                    .unwrap()
+            );
+
+            for (i, version_part) in version_info.smartctl_version.iter().enumerate() {
+                assert_eq!(
+                    *version_part,
+                    json_output
+                        .get("smartctl")
+                        .and_then(|v| v.get("version"))
+                        .and_then(|v| v.as_array())
+                        .and_then(|v| v.get(i))
+                        .and_then(|v| v.as_u64())
+                        .unwrap() as u8
+                );
+            }
+
+            for (i, version_part) in version_info.json_format_version.iter().enumerate() {
+                assert_eq!(
+                    *version_part,
+                    json_output
+                        .get("json_format_version")
+                        .and_then(|v| v.as_array())
+                        .and_then(|v| v.get(i))
+                        .and_then(|v| v.as_u64())
+                        .unwrap() as u8
+                );
+            }
+        }
     }
 
     #[test]
     fn test_parse_json_scan_output() {
-        let example_output = r#"
-        {
-            "json_format_version": [
-              1,
-              0
-            ],
-            "smartctl": {
-              "version": [
-                7,
-                2
-              ],
-              "svn_revision": "5155",
-              "platform_info": "x86_64-linux-6.0.6-76060006-generic",
-              "build_info": "(local build)",
-              "argv": [
-                "smartctl",
-                "--scan",
-                "-j"
-              ],
-              "exit_status": 0
-            },
-            "devices": [
-              {
-                "name": "/dev/sda",
-                "info_name": "/dev/sda",
-                "type": "scsi",
-                "protocol": "SCSI"
-              },
-              {
-                "name": "/dev/sdb",
-                "info_name": "/dev/sdb",
-                "type": "scsi",
-                "protocol": "SCSI"
-              },
-              {
-                "name": "/dev/sdc",
-                "info_name": "/dev/sdc",
-                "type": "scsi",
-                "protocol": "SCSI"
-              }
-            ]
-          }          
-        "#;
+        let example_outputs = EXAMPLE_SCAN.iter().chain(EXAMPLE_SCAN_OPEN.iter());
 
-        let json_output = serde_json::from_str(example_output).unwrap();
+        for output in example_outputs {
+            let json_output: serde_json::Value = serde_json::from_str(&output).unwrap();
 
-        let scan_output = parse_json_scan_output(json_output).unwrap();
-        assert!(scan_output.len() == 3);
+            let scan_output = parse_json_scan_output(&json_output).unwrap();
+            assert_eq!(
+                scan_output.len(),
+                json_output
+                    .get("devices")
+                    .and_then(|v| v.as_array())
+                    .map(|v| v.len())
+                    .unwrap()
+            );
+        }
     }
 }
