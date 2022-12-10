@@ -4,9 +4,6 @@
 use anyhow::Error;
 use serde::{self, Deserialize, Serialize};
 
-#[cfg(not(test))]
-use crate::SmartCtl;
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SmartCtlSelfTestStatus {
     value: u8,
@@ -27,11 +24,6 @@ pub struct SmartCtlSelfTestPolling {
 /// This struct does *not* represent any past tests.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SmartCtlSelfTest {
-    #[cfg(not(test))]
-    #[serde(skip_serializing)]
-    #[serde(skip_deserializing)]
-    #[allow(dead_code)]
-    bin_instance: SmartCtl, //TODO: Implement custom deserializer that will inject a given bin_instance!
     status: SmartCtlSelfTestStatus,
     polling_minutes: SmartCtlSelfTestPolling,
 }
