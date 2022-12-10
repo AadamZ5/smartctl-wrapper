@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::Arc};
 
 use crate::smartctl_dev::{parse_json_device_output, SmartCtlDevice};
 use anyhow::Error;
@@ -145,9 +145,21 @@ impl Display for SmartCtlVersionInfo {
     }
 }
 
-pub struct SmartCtl {
+#[derive(Debug, Clone)]
+pub struct InnerSmartCtl {
     path: String,
     version_info: SmartCtlVersionInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct SmartCtl {
+    inner: Arc<InnerSmartCtl>,
+}
+
+impl Default for SmartCtl {
+    fn default() -> Self {
+        Self::new().unwrap()
+    }
 }
 
 impl SmartCtl {
@@ -200,7 +212,10 @@ impl SmartCtl {
         debug!("Build Info: {}", version_info.build_info);
         debug!("Using path {:?}", path);
 
-        let definition = SmartCtl { path, version_info };
+        let definition = InnerSmartCtl { path, version_info };
+        let definition = Self {
+            inner: Arc::new(definition),
+        };
 
         Ok(definition)
     }
@@ -227,12 +242,12 @@ impl SmartCtl {
 
     /// Get the version info for the smartctl binary
     pub fn get_version_info(&self) -> &SmartCtlVersionInfo {
-        &self.version_info
+        &self.inner.version_info
     }
 
     /// Return the path being used to the `smartctl` binary
     pub fn get_path(&self) -> String {
-        self.path.clone()
+        self.inner.path.clone()
     }
 
     /// Execute the smartctl binary with the supplied arguments. This is the lowest
@@ -257,13 +272,13 @@ impl SmartCtl {
         T: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let output = Command::new(&self.path)
+        let output = Command::new(&self.inner.path)
             .args(args.into_iter().map(|v| Into::<String>::into(v)))
             .output()
             .map_err(|e| {
                 Error::msg(format!(
                     "Failed to execute smartctl (at {:?}): {}",
-                    self.path, e
+                    self.inner.path, e
                 ))
             })?;
 
@@ -317,9 +332,9 @@ impl SmartCtl {
     /// Get a device using the `smartctl` binary. This function will return a `SmartCtlDevice`
     /// object that can be used to query the device.
     pub fn get_device(&self, device_path: String) -> Result<SmartCtlDevice, Error> {
-        let json = self.execute_json(["--info".to_string(), device_path])?;
+        let json = self.execute_json(["--all".to_string(), device_path])?;
 
-        parse_json_device_output(&json)
+        parse_json_device_output(&json, Some(self.clone()))
     }
 }
 

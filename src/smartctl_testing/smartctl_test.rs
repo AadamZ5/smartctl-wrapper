@@ -2,7 +2,9 @@
 //! tests.
 
 use anyhow::Error;
-use serde::{Deserialize, Serialize};
+use serde::{self, Deserialize, Serialize};
+
+use crate::SmartCtl;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SmartCtlSelfTestStatus {
@@ -14,8 +16,9 @@ pub struct SmartCtlSelfTestStatus {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SmartCtlSelfTestPolling {
-    short: u8,
-    extended: u8,
+    short: Option<u64>,
+    extended: Option<u64>,
+    conveyance: Option<u64>,
 }
 
 /// A struct representing a currently running test on the SMART drive.
@@ -23,11 +26,56 @@ pub struct SmartCtlSelfTestPolling {
 /// This struct does *not* represent any past tests.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SmartCtlSelfTest {
+    #[serde(skip_serializing)]
+    #[serde(skip_deserializing)]
+    #[allow(dead_code)]
+    bin_instance: SmartCtl, //TODO: Implement custom deserializer that will inject a given bin_instance!
     status: SmartCtlSelfTestStatus,
     polling_minutes: SmartCtlSelfTestPolling,
 }
 
-pub fn parse_json_ata_smart_data(
+impl SmartCtlSelfTest {
+    pub fn is_running(&self) -> bool {
+        self.status.value != 0
+    }
+
+    pub fn get_test_types(&self) -> Result<Vec<(String, u64)>, Error> {
+        let test_types: Vec<(String, Result<u64, Error>)> =
+            serde_json::to_value(&self.polling_minutes)?
+                .get("polling_minutes")
+                .and_then(|v| v.as_object())
+                .map(|v| v.into_iter())
+                .unwrap()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        v.as_u64().ok_or_else(|| Error::msg("Expected u64")),
+                    )
+                })
+                .collect();
+
+        for (test_type, minutes) in test_types.iter() {
+            if minutes.is_err() {
+                return Err(Error::msg(format!(
+                    "Expected u64 for test type {}",
+                    test_type
+                )));
+            }
+        }
+
+        let test_types = test_types
+            .into_iter()
+            .filter(|(_, minutes)| minutes.is_ok())
+            .map(|(test_type, minutes)| (test_type, minutes.unwrap()))
+            .collect();
+
+        Ok(test_types)
+    }
+}
+
+//TODO: Implement a test progress stream!
+
+pub fn parse_json_ata_smart_data_to_self_test(
     ata_smart_data: &serde_json::Value,
 ) -> Result<SmartCtlSelfTest, Error> {
     // json should be the "ata_smart_data" field of the json output
@@ -54,9 +102,7 @@ mod tests {
 
             let ata_smart_data = json.get("ata_smart_data").unwrap();
 
-            let self_test = parse_json_ata_smart_data(ata_smart_data).unwrap();
-
-            println!("{}", output);
+            let self_test = parse_json_ata_smart_data_to_self_test(ata_smart_data).unwrap();
 
             let self_test_actual = ata_smart_data.get("self_test").unwrap();
 
@@ -103,7 +149,6 @@ mod tests {
                     .get("polling_minutes")
                     .and_then(|v| v.get("short"))
                     .and_then(|v| v.as_u64())
-                    .unwrap() as u8
             );
             assert_eq!(
                 self_test.polling_minutes.extended,
@@ -111,7 +156,14 @@ mod tests {
                     .get("polling_minutes")
                     .and_then(|v| v.get("extended"))
                     .and_then(|v| v.as_u64())
-                    .unwrap() as u8
+            );
+
+            assert_eq!(
+                self_test.polling_minutes.conveyance,
+                self_test_actual
+                    .get("polling_minutes")
+                    .and_then(|v| v.get("conveyance"))
+                    .and_then(|v| v.as_u64())
             );
         }
     }

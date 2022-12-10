@@ -1,7 +1,7 @@
 use anyhow::Error;
 use serde::{de::Visitor, Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SmartCtlTestEntryStatusValue {
     Passed = 0,
@@ -51,6 +51,7 @@ impl TryFrom<i8> for SmartCtlTestEntryStatusValue {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl Into<u8> for SmartCtlTestEntryStatusValue {
     fn into(self) -> u8 {
         // We can simple cast the enum to a u8 since the repr is set to u8,

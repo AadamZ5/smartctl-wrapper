@@ -1,7 +1,14 @@
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 
-use crate::smartctl_bin::SmartCtl;
+use crate::{
+    smartctl_bin::SmartCtl,
+    smartctl_testing::{
+        smartctl_test::parse_json_ata_smart_data_to_self_test,
+        smartctl_test_entry::parse_json_all_output_test_entries,
+    },
+    SmartCtlSelfTest, SmartCtlTestEntry,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SmartCtlWwn {
@@ -63,6 +70,8 @@ pub struct SmartCtlDevice {
     pub form_factor: Option<SmartCtlDeviceFormFactor>,
 
     pub device_health: SmartCtlDeviceHealth,
+
+    bin_instance: SmartCtl,
 }
 
 impl SmartCtlDevice {
@@ -73,9 +82,64 @@ impl SmartCtlDevice {
 
         Ok(dev)
     }
+
+    pub fn get_test_entries(&self) -> Result<Vec<SmartCtlTestEntry>, Error> {
+        let all_json = self
+            .bin_instance
+            .execute_json(["-all", self.name.as_str()])?;
+
+        parse_json_all_output_test_entries(&all_json)
+    }
+
+    /// Returns a list of supported test types and their estimated time in minutes reported
+    /// from `smartctl`. This is found in the `ata_smart_data.self_test.polling_minutes`
+    /// section of the JSON output.
+    pub fn get_supported_test_types_and_minutes(&self) -> Result<Vec<(String, u64)>, Error> {
+        let all_json = self
+            .bin_instance
+            .execute_json(["--all", self.name.as_str()])?;
+
+        parse_json_ata_smart_data_to_self_test(&all_json).and_then(|v| v.get_test_types())
+    }
+
+    pub fn start_self_test<T>(&self, test_type: T) -> Result<SmartCtlSelfTest, Error>
+    where
+        T: Into<String>,
+    {
+        // First check if the test type is one supported by this drive
+        let mut supported_test_types = self
+            .get_supported_test_types_and_minutes()?
+            .into_iter()
+            .map(|(t, _)| t);
+
+        // TODO: Add a list of tests that all drives support but don't report
+        // TODO: (if any)
+
+        let test_type_ref = &Into::<String>::into(test_type);
+
+        if !supported_test_types.any(|t| &t == test_type_ref) {
+            return Err(Error::msg(format!(
+                "Test type {} is not supported by this drive",
+                test_type_ref
+            )));
+        }
+
+        self.bin_instance
+            .execute(["-t", test_type_ref.as_str(), self.name.as_str()])?;
+
+        let all_json_output = self
+            .bin_instance
+            .execute_json(["--all", self.name.as_str()])?;
+        let self_test = parse_json_ata_smart_data_to_self_test(&all_json_output)?;
+
+        Ok(self_test)
+    }
 }
 
-pub fn parse_json_device_output(json: &serde_json::Value) -> Result<SmartCtlDevice, Error> {
+pub fn parse_json_device_output(
+    json: &serde_json::Value,
+    bin_instance_to_supply: Option<SmartCtl>,
+) -> Result<SmartCtlDevice, Error> {
     let form_factor = SmartCtlDeviceFormFactor::deserialize(&json["form_factor"]).ok();
 
     let wwn = SmartCtlWwn::deserialize(&json["wwn"]).ok();
@@ -124,6 +188,8 @@ pub fn parse_json_device_output(json: &serde_json::Value) -> Result<SmartCtlDevi
         form_factor,
 
         device_health: SmartCtlDeviceHealth {},
+
+        bin_instance: bin_instance_to_supply.unwrap_or(SmartCtl::new()?),
     };
 
     Ok(device)
@@ -142,7 +208,7 @@ mod tests {
         for output in example_outputs {
             let json_output = serde_json::from_str(output).unwrap();
 
-            let device_output = parse_json_device_output(&json_output).unwrap();
+            let device_output = parse_json_device_output(&json_output, None).unwrap();
 
             assert_eq!(
                 device_output.model_family.unwrap(),

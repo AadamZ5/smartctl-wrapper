@@ -42,24 +42,22 @@ pub fn parse_json_ata_test_entry(entry: &serde_json::Value) -> Result<SmartCtlTe
 }
 
 pub fn parse_json_all_output_test_entries(
-    json: serde_json::Value,
+    json: &serde_json::Value,
 ) -> Result<Vec<SmartCtlTestEntry>, Error> {
     // First check to see if this is a proper device JSON output
-    let _device = parse_json_device_output(&json)?;
+    let _device = parse_json_device_output(json, None)?;
 
     let standard_tests = json
         .get("ata_smart_self_test_log")
-        .ok_or(Error::msg(
-            "Missing \"ata_smart_self_test_log\" in JSON response!",
-        ))?
+        .ok_or_else(|| Error::msg("Missing \"ata_smart_self_test_log\" in JSON response!"))?
         .get("standard")
-        .ok_or(Error::msg(
-            "Missing \"ata_smart_self_test_log.standard\" in JSON response!",
-        ))?;
+        .ok_or_else(|| {
+            Error::msg("Missing \"ata_smart_self_test_log.standard\" in JSON response!")
+        })?;
 
-    let standard_tests_revision = standard_tests.get("revision").ok_or(Error::msg(
-        "Missing \"ata_smart_self_test_log.standard.revision\" in JSON response!",
-    ))?;
+    let standard_tests_revision = standard_tests.get("revision").ok_or_else(|| {
+        Error::msg("Missing \"ata_smart_self_test_log.standard.revision\" in JSON response!")
+    })?;
 
     if standard_tests_revision != 1 {
         return Err(Error::msg(
@@ -69,17 +67,17 @@ pub fn parse_json_all_output_test_entries(
 
     let standard_tests_entries = standard_tests
         .get("table")
-        .ok_or(Error::msg(
-            "Missing \"ata_smart_self_test_log.standard.table\" in JSON response!",
-        ))?
+        .ok_or_else(|| {
+            Error::msg("Missing \"ata_smart_self_test_log.standard.table\" in JSON response!")
+        })?
         .as_array()
-        .ok_or(Error::msg(
-            "Invalid \"ata_smart_self_test_log.standard.table\" in JSON response!",
-        ))?;
+        .ok_or_else(|| {
+            Error::msg("Invalid \"ata_smart_self_test_log.standard.table\" in JSON response!")
+        })?;
 
     let parsed_test_entries = standard_tests_entries
         .iter()
-        .map(|entry| parse_json_ata_test_entry(entry))
+        .map(parse_json_ata_test_entry)
         .collect::<Result<Vec<SmartCtlTestEntry>, Error>>()?;
 
     Ok(parsed_test_entries)
@@ -204,7 +202,7 @@ mod tests {
         for output in example_outputs {
             let json_output: serde_json::Value = serde_json::from_str(output).unwrap();
 
-            let parsed_entries = parse_json_all_output_test_entries(json_output.clone()).unwrap();
+            let parsed_entries = parse_json_all_output_test_entries(&json_output).unwrap();
 
             for (i, entry) in parsed_entries.iter().enumerate() {
                 let test_entry_json = get_test_entry_from_json(&json_output, i as u8).unwrap();
